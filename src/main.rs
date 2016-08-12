@@ -62,7 +62,7 @@ impl TwitchFileSystem {
                         .find_path(&["stream", "game"])
                         .unwrap()
                         .as_string()
-                        .unwrap();
+                        .unwrap_or("");
 
                     let name = stream
                         .find_path(&["stream", "channel", "display_name"])
