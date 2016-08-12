@@ -18,13 +18,16 @@ use clap::{App, Arg};
 
 struct TwitchFileSystem {
     attrs: BTreeMap<u64, FileAttr>,
-    inodes: BTreeMap<String, u64>
+    inodes: BTreeMap<String, u64>,
+    urls: BTreeMap<u64, String>
 }
 
 impl TwitchFileSystem {
     fn new() -> TwitchFileSystem {
         let mut attrs = BTreeMap::new();
         let mut inodes = BTreeMap::new();
+        let mut urls = BTreeMap::new();
+ 
         let ts = time::now().to_timespec();
         let attr = FileAttr {
             ino: 1,
@@ -55,10 +58,29 @@ impl TwitchFileSystem {
             Ok(data) => {
                 let streams = data.find("featured").unwrap().as_array().unwrap();
                 for (i, stream) in streams.iter().enumerate() {
+                    let game = stream
+                        .find_path(&["stream", "game"])
+                        .unwrap()
+                        .as_string()
+                        .unwrap();
+
+                    let name = stream
+                        .find_path(&["stream", "channel", "display_name"])
+                        .unwrap()
+                        .as_string()
+                        .unwrap();
+ 
+                    let url = stream
+                        .find_path(&["stream", "channel", "url"])
+                        .unwrap()
+                        .as_string()
+                        .unwrap()
+                        .to_owned();
+
                     let attr = FileAttr {
                         ino: i as u64 + 2,
-                        size: 0,
-                        blocks: 0,
+                        size: url.len() as u64,
+                        blocks: 1,
                         atime: ts,
                         mtime: ts,
                         ctime: ts,
@@ -71,26 +93,15 @@ impl TwitchFileSystem {
                         rdev: 0,
                         flags: 0
                     };
-
-                    let game = stream
-                        .find_path(&["stream", "game"])
-                        .unwrap()
-                        .as_string()
-                        .unwrap();
-
-                    let name = stream
-                        .find_path(&["stream", "channel", "display_name"])
-                        .unwrap()
-                        .as_string()
-                        .unwrap();
-
+ 
                     attrs.insert(attr.ino, attr);
                     inodes.insert(format!("{} - {}", name, game), attr.ino);
+                    urls.insert(attr.ino, url);
                 }
             },
             Err(_) => println!("Twitch returned invalid json")
         }
-        TwitchFileSystem {attrs: attrs, inodes: inodes}
+        TwitchFileSystem {attrs: attrs, inodes: inodes, urls: urls}
     }
 }
 
@@ -138,7 +149,11 @@ impl Filesystem for TwitchFileSystem {
         reply.ok();
     }
     fn read(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, size: u32, reply: ReplyData) {
-        reply.data("test".as_bytes());
+        if self.urls.contains_key(&ino) {
+            reply.data(self.urls.get(&ino).unwrap().as_bytes());
+            return;
+        }
+        reply.error(ENOSYS);
     }
 }
 
