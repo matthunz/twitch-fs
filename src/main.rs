@@ -46,15 +46,15 @@ impl TwitchFileSystem {
         inodes.insert("/".to_owned(), 1);
         let mut body = String::new();
         Client::new()
-            .get("https://api.twitch.tv/kraken/games/top")
+            .get("https://api.twitch.tv/kraken/streams/featured")
             .send()
             .expect("Couldn't load twitch")
             .read_to_string(&mut body);
 
         match Json::from_str(&body) {
             Ok(data) => {
-                let games = data.find("top").unwrap().as_array().unwrap();
-                for (i, game) in games.iter().enumerate() {
+                let streams = data.find("featured").unwrap().as_array().unwrap();
+                for (i, stream) in streams.iter().enumerate() {
                     let attr = FileAttr {
                         ino: i as u64 + 2,
                         size: 0,
@@ -63,7 +63,7 @@ impl TwitchFileSystem {
                         mtime: ts,
                         ctime: ts,
                         crtime: ts,
-                        kind: FileType::Directory,
+                        kind: FileType::RegularFile,
                         perm: 0o644,
                         nlink: 0,
                         uid: 0,
@@ -71,14 +71,21 @@ impl TwitchFileSystem {
                         rdev: 0,
                         flags: 0
                     };
-                    let name = game
-                        .find_path(&["game", "name"])
+
+                    let game = stream
+                        .find_path(&["stream", "game"])
+                        .unwrap()
+                        .as_string()
+                        .unwrap();
+
+                    let name = stream
+                        .find_path(&["stream", "channel", "display_name"])
                         .unwrap()
                         .as_string()
                         .unwrap();
 
                     attrs.insert(attr.ino, attr);
-                    inodes.insert(name.to_owned(), attr.ino);
+                    inodes.insert(format!("{} - {}", name, game), attr.ino);
                 }
             },
             Err(_) => println!("Twitch returned invalid json")
@@ -117,15 +124,15 @@ impl Filesystem for TwitchFileSystem {
 
     fn readdir(&mut self, _req: &Request, ino: u64, fh: u64, offset: u64, mut reply: ReplyDirectory) {
         if offset == 0 {
-            for (game, &inode) in &self.inodes {
-                if inode == 1 { continue; }
-                let offset = inode;
-                reply.add(inode, offset, FileType::RegularFile, &Path::new(game));
+            if ino == 1 {
+                for (stream, &inode) in &self.inodes {
+                    if inode == 1 { continue; }
+                    let offset = inode;
+                    reply.add(inode, offset, FileType::RegularFile, &Path::new(stream));
+                }
+                reply.add(1, 0, FileType::Directory, &Path::new("."));
+                reply.add(1, 1, FileType::Directory, &Path::new(".."));
             }
-            reply.add(1, 0, FileType::Directory, &Path::new("."));
-            reply.add(1, 1, FileType::Directory, &Path::new(".."));
-        } else if offset == 1 {
-            reply.add(1, 0, FileType::Directory, &Path::new("u wot m8"));
         }
 
         reply.ok();
